@@ -1,0 +1,34 @@
+name: Publish Adam Arma site
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v5
+      - name: Extract validated static release
+        run: |
+          mkdir -p _site
+          unzip -q ADAM_ARMA_GITHUB_PAGES_READY.zip -d _site
+          test -f _site/index.html
+          test -f _site/ru/index.html
+          test -f _site/sitemap.xml
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
