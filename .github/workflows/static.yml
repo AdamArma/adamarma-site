@@ -1,21 +1,25 @@
 name: Publish Adam Arma site
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 concurrency:
-  group: pages
+  group: "pages"
   cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: "${{ steps.deployment.outputs.page_url }}"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/configure-pages@v5
@@ -26,9 +30,14 @@ jobs:
           test -f _site/index.html
           test -f _site/ru/index.html
           test -f _site/sitemap.xml
+      - name: Install consent-based analytics
+        run: python3 tools/analytics/install.py
+        env:
+          GA4_ID: "${{ vars.ADAMARMA_GA4_ID }}"
+          YANDEX_METRIKA_ID: "${{ vars.ADAMARMA_METRIKA_ID }}"
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: _site
+          path: "_site"
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
