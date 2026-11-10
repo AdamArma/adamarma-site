@@ -1,19 +1,15 @@
 name: Publish Adam Arma site
-
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
   pages: write
   id-token: write
-
 concurrency:
   group: "pages"
   cancel-in-progress: false
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -30,6 +26,30 @@ jobs:
           test -f _site/index.html
           test -f _site/ru/index.html
           test -f _site/sitemap.xml
+      - name: Add consent-gated analytics to full extracted release
+        env:
+          GA4_ID: G-ZN0G1XNL98
+          YM_ID: ${{ vars.ADAMARMA_YM_ID }}
+        run: |
+          python3 -
+JS='(()=>{"use strict";\nconst el=document.currentScript,ga=el?.dataset.ga4,ym=el?.dataset.ym;if(!ga&&!ym)return;\nconst l=(document.documentElement.lang||"en").slice(0,2),rtl=["fa","ar","he"].includes(l);\nconst dict={ru:["Статистика посещений","Разрешить аналитику Google и Яндекс для подсчёта просмотров, стран, источников и страниц?","Разрешить","Отказаться","Настройки статистики"],en:["Visitor statistics","Allow Google and Yandex analytics to measure visits, countries, sources and pages?","Allow","Decline","Analytics settings"],fa:["آمار بازدید","آیا با آمار بازدید Google و Yandex موافقید؟","موافقم","رد می\\u200cکنم","تنظیمات آمار"],ar:["إحصاءات الزيارات","هل تسمح بتحليلات Google وYandex لقياس الزيارات؟","أوافق","أرفض","إعدادات الإحصاءات"],he:["סטטיסטיקת بיקורים","לאפשר ניתוח ביקורים של Google ו־Yandex?","אישור","סירוב","הגדרות סטטיסטיקה"]};const t=dict[l]||dict.en,key="adamarma.analytics.consent.v1";let active=false;\nconst load=u=>{let s=document.createElement("script");s.async=true;s.src=u;document.head.append(s)};\nfunction start(){if(active)return;active=true;if(ga){window.dataLayer=window.dataLayer||[];window.gtag=function(){dataLayer.push(arguments)};gtag("js",new Date());gtag("config",ga,{send_page_view:true,allow_google_signals:false,allow_ad_personalization_signals:false});load("https://www.googletagmanager.com/gtag/js?id="+ga)}if(ym){window.ym=window.ym||function(){(window.ym.a=window.ym.a||[]).push(arguments)};window.ym.l=Date.now();window.ym(Number(ym),"init",{webvisor:false,clickmap:false,trackLinks:false});load("https://mc.yandex.ru/metrika/tag.js")}}\nfunction read(){try{return localStorage.getItem(key)}catch(e){return null}}function save(v){try{localStorage.setItem(key,v)}catch(e){} }\nfunction ready(){let style=document.createElement("style");style.textContent="#arma-analytics{position:fixed;z-index:2147483600;bottom:12px;left:12px;max-width:420px;width:calc(100vw - 24px);box-sizing:border-box;padding:16px;border:1px solid #c7ae75;border-radius:12px;background:#18181d;color:#fff;font:14px/1.5 system-ui;text-align:start;box-shadow:0 8px 30px #0009}#arma-analytics p{margin:6px 0 12px}#arma-analytics button,#arma-settings{border:1px solid #c7ae75;border-radius:8px;padding:8px;background:#18181d;color:#fff;cursor:pointer}#arma-analytics button{margin-inline-end:8px}#arma-settings{position:fixed;bottom:8px;left:8px;z-index:2147483599;font:11px system-ui}";document.head.append(style);let box=null;const setting=document.createElement("button");setting.type="button";setting.id="arma-settings";setting.textContent=t[4];document.body.append(setting);function open(){if(box)return;setting.hidden=true;box=document.createElement("section");box.id="arma-analytics";box.dir=rtl?"rtl":"ltr";box.setAttribute("role","region");box.setAttribute("aria-label",t[0]);let title=document.createElement("strong"),p=document.createElement("p"),yes=document.createElement("button"),no=document.createElement("button");title.textContent=t[0];p.textContent=t[1];yes.textContent=t[2];no.textContent=t[3];yes.onclick=()=>choose("yes");no.o click=()=>choose("no");box.append(title,p,yes,no);document.body.append(box)}function choose(v){save(v);box?.remove();box=null;setting.hidden=false;if(v==="yes")start();else if(active)location.reload()}setting.onclick=open;let v=read();if(v==="yes")start();else if(v!=="no")open()}\nif(document.readyState==="loading")document.addEventListener("DOMContentLoaded",ready,{once:true});else ready()})();'
+from pathlib import Path
+import os,re
+site=Path('_site'); ga=os.environ['GA4_ID']; ym=os.environ.get('YM_ID','')
+assert re.fullmatch(r'G-[A-Za-z0-9]{6,20}',ga) and (not ym or re.fullmatch(r'[0-9]{5,12}',ym))
+js=site/'assets/analytics/consent.js';js.parent.mkdir(parents=True,exist_ok=True)
+js.write_text(JS,encoding='utf-8')
+tag=''
+n=0
+for f in site.rglob('*.html'):
+ s=f.read_text(encoding='utf-8')
+ if 'data-ga4=' in s:raise SystemExit('Duplicate tracking: '+str(f))
+ if '' ot in s.lower():continue
+ s=re.sub(r'',lambda m:tag+m.group(),s,count=1,flags=re.I)
+ f.write_text(s,encoding='utf-8');n+=1
+assert n>=54, n
+print('GA4 consent installed on',n,'HTML pages')
+PY
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
