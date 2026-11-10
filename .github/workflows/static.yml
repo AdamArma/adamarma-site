@@ -30,14 +30,10 @@ jobs:
           test -f _site/index.html
           test -f _site/ru/index.html
           test -f _site/sitemap.xml
-      - name: Install consent-based analytics
-        run: python3 tools/analytics/install.py
-        env:
-          GA4_ID: "${{ vars.ADAMARMA_GA4_ID }}"
-          YANDEX_METRIKA_ID: "${{ vars.ADAMARMA_METRIKA_ID }}"
-      - uses: actions/upload-pages-artifact@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: "_site"
-      - name: Deploy
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
