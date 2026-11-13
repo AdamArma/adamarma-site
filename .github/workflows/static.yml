@@ -26,6 +26,30 @@ jobs:
           test -f _site/index.html
           test -f _site/ru/index.html
           test -f _site/sitemap.xml
+      - name: Install Cloudflare Web Analytics
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          beacon = b"""<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "559272d701a548439eed9552232893c8"}'></script><!-- End Cloudflare Web Analytics -->"""
+          closing_body = re.compile(rb"</body\s*>", re.IGNORECASE)
+          installed = 0
+          for page in sorted(Path("_site").rglob("*.html")):
+              original = page.read_bytes()
+              if b"static.cloudflareinsights.com/beacon.min.js" in original:
+                  raise SystemExit(f"Unexpected existing Cloudflare beacon in {page}")
+              matches = list(closing_body.finditer(original))
+              if not matches:
+                  print(f"Skipping HTML without a closing body: {page}")
+                  continue
+              offset = matches[-1].start()
+              page.write_bytes(original[:offset] + beacon + b"\n" + original[offset:])
+              installed += 1
+          if installed < 53:
+              raise SystemExit(f"Unexpectedly few pages with a beacon: {installed}")
+          print(f"Installed Cloudflare Web Analytics on {installed} pages")
+          PY
       - uses: actions/upload-pages-artifact@v4
         with:
           path: _site
