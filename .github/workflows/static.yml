@@ -27,6 +27,126 @@ jobs:
           test -f _site/index.html
           test -f _site/ru/index.html
           test -f _site/sitemap.xml
+      - name: Validate SEO and localized pages
+        run: |
+          python3 - <<'PY'
+          import json
+          from html.parser import HTMLParser
+          from pathlib import Path
+          from urllib.parse import unquote, urljoin, urlsplit
+          from xml.etree import ElementTree
+
+          site = 'https://adamarma.ru/'
+          languages = 'ar bn cs de el en es fa fr he hi id it ja kk ko nl pl pt ru sv sw th tr uk uz vi zh'.split()
+          home = {lang: site + lang + '/' for lang in languages}
+          guide = {lang: url + 'guide/' for lang, url in home.items()}
+          expected = {site, *home.values(), *guide.values()}
+          root = Path('_site')
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          class Page(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.tags = []
+                  self.structured = []
+                  self.capture = None
+                  self.heading = ''
+                  self.title = ''
+                  self.body_text = []
+
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  self.tags.append((tag, attrs))
+                  if tag in ('title','h1','script','style'):
+                      self.capture = tag
+                      if tag == 'script' and attrs.get('type') == 'application/ld+json':
+                          self.structured.append('')
+                          self.capture = 'json'
+
+              def handle_endtag(self, tag):
+                  if tag == self.capture or tag == 'script' and self.capture == 'json':
+                      self.capture = None
+
+              def handle_data(self, data):
+                  if self.capture == 'json':
+                      self.structured[-1] += data
+                  elif self.capture == 'title':
+                      self.title += data
+                  elif self.capture == 'h1':
+                      self.heading += data
+                  elif self.capture is None:
+                      self.body_text.append(data.strip())
+
+              def attrs(self, tag):
+                  return [attrs for name, attrs in self.tags if tag == name]
+
+          robots = (root / 'robots.txt').read_text(encoding='utf-8')
+          require(any(line.strip().lower() == ('Sitemap: ' + site + 'sitemap.xml').lower() for line in robots.splitlines()), 'Missing canonical sitemap declaration')
+          require(not any(line.split('#',1)[0].strip().lower() == 'disallow: /' for line in robots.splitlines()), 'robots.txt blocks the entire site')
+          sitemap = [e.text for e in ElementTree.parse(root / 'sitemap.xml').findall('{*}url/{*}loc')]
+          require(set(sitemap) == expected and len(sitemap) == len(expected), 'Unexpected canonical URLs in sitemap')
+          require((root / '.nojekyll').is_file(), 'Missing .nojekyll')
+          descriptions, titles = set(), set()
+          for url in sorted(expected):
+              route = url.removeprefix(site)
+              lang = route.split('/')[0] or 'en'
+              page = Page()
+              page.feed((root / route / 'index.html').read_text(encoding='utf-8'))
+              page.close()
+              metas = page.attrs('meta')
+              meta = {a.get('name') or a.get('property'): a.get('content') or '' for a in metas}
+              html = page.attrs('html')[0]
+              direction = 'rtl' if lang in ('ar','fa','he') else 'ltr'
+              require(html.get('lang') == lang and html.get('dir') == direction, f'{url}: language or direction')
+              description = meta.get('description','').strip()
+              require(page.title.strip() and page.title not in titles, f'{url}: missing or duplicate title')
+              require(description and description not in descriptions, f'{url}: missing or duplicate description')
+              descriptions.add(description)
+              titles.add(page.title)
+              require(len(page.attrs('h1')) == 1 and page.heading.strip(), f'{url}: missing or duplicate H1')
+              require(sum(map(len,page.body_text)) >= 225, f'{url}: missing readable content')
+              for tag in metas:
+                  if tag.get('name','').lower() in ('robots','googlebot','yandex','bingbot'):
+                      require('noindex' not in tag.get('content','').lower(), f'{url}: noindex')
+              links = page.attrs('link')
+              require([a.get('href') for a in links if a.get('rel')=='canonical'] == [url], f'{url}: canonical mismatch')
+              mapping = guide if route.endswith('/guide/') else home
+              default = guide['en'] if mapping is guide else site
+              alternates = [(a['hreflang'],a.get('href')) for a in links if a.get('rel')=='alternate' and 'hreflang' in a]
+              require(len(alternates)==29 and dict(alternates)=={**mapping,'x-default': default}, f'{url}: incorrect hreflang')
+              require(all(meta.get(k) for k in ('og:title','og:description','og:image','twitter:card')), f'{url}: social preview incomplete')
+              require(meta.get('og:url')==url, f'{url}: Open Graph URL')
+              require(page.structured and all(isinstance(json.loads(s),(list,dict)) for s in page.structured), f'{url}: JSON-LD')
+              anchors = {urljoin(url,a['href']) for a in page.attrs('a') if a.get('href')}
+              if route and mapping is home:
+                  ids = {a.get('id') for _,a in page.tags}
+                  require({'orbit','positive','negative','replay','read-transition'} <= ids, f'{url}: formula controls missing')
+                  require(guide[lang] in anchors, f'{url}: no link to localized guide')
+              elif mapping is guide:
+                  checked = {p.split('/guide/')[0]+'/guide/' for p in anchors if '/guide/' in p}
+                  require(set(guide.values()) <= checked, f'{url}: missing guide language links')
+              else:
+                  require(set(home.values()) <= anchors, f'{url}: language menu incomplete')
+              scripts = [a.get('src','') for a in page.attrs('script')]
+              require(any('/analytics/yandex.' in s for s in scripts) and any('/analytics/analytics.' in s for s in scripts), f'{url}: analytics loader missing')
+              if route:
+                  require(any('/share/share.' in s for s in scripts), f'{url}: share script missing')
+              assets = [(a.get(k) or '') for t,k in (('a','href'),('link','href'),('script','src'),('img','src')) for a in page.attrs(t)]
+              assets.append(meta['og:image'])
+              for href in set(assets):
+                  if not href or href.startswith('#'):
+                      continue
+                  target = urlsplit(urljoin(url,href))
+                  require(target.scheme in ('http','https','mailto','tel'), f'{url}: unsupported link protocol')
+                  if target.netloc == 'adamarma.ru':
+                      p = root / unquote(target.path).lstrip('/')
+                      require(p.is_file() or (p/'index.html').is_file(), f'{url}: missing target {target.path}')
+
+          print(f'Validated {len(expected)} canonical pages across {len(languages)} languages')
+          PY
       - name: Install Cloudflare Web Analytics
         run: |
           python3 - <<'PY'
